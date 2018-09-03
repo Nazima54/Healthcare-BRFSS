@@ -30,7 +30,7 @@ output: html_document
 * Weighting is generally not used.
 * More often done by independent researchers.
 
-### Resources
+
 #### BRFSS Resource Provided by CDC.
 * Datasets https://www.cdc.gov/brfss/annual_data/annual_data.htm
 * Questionnaires.
