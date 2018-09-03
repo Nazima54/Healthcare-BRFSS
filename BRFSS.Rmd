@@ -14,7 +14,7 @@ output: html_document
 * National Health and Nutrition Examination Survey(NHANES).
 * Behavior Risk Factor Surveillance System (BRFSS).
 
-
+### We will be using BRFSS dataset
 * BRFSS is a federal and state collaboration
 * Data collectors call randomly generated landline phone numbers or cell phone numbers.
 * Data from BRFSS are publicly available and can be used widely by CDC for healthcare program planning. And also independent researchers can use this data for in-depth reseacrch and analytics purpose.
