@@ -1,1 +1,9 @@
+library(knitr)
+# Package Desription
+# foreign   : Reads in "foreign" data types.
+# gtools    : Allows you to make macros.
+# dplyr     : Helps packages for calculating means and standard deviations.
+# questionr : Allows you to do a weighted analysis.
+# MASS      : Allows you to do bivariate tests.
+
 
