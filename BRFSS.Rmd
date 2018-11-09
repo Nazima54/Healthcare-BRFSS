@@ -1,1 +1,752 @@
+---
+title: "Descriptive BRFSS Healthcare Data Analytics using R"
+author: "Nazima Khan"
+date: "May 9, 2017"
+output: html_document
+---
+## Objective
+#### To Analyze Behavior Risk Factor Surveillance System (BRFSS) for "VETERANS" using BRFSS dataset.
+
+## Brief Summary on the topic
+#### What is risk factor surveillance?
+#### Keeping track of the rates of risk factors which are the things or states in our daily lives that confers risk to our health is defined as a Risk Factor Surveillance.
+#### There are two main Surveillance systems in the United States
+* National Health and Nutrition Examination Survey(NHANES).
+* Behavior Risk Factor Surveillance System (BRFSS).
+
+### We will be using BRFSS dataset
+* BRFSS is a federal and state collaboration
+* Data collectors call randomly generated landline phone numbers or cell phone numbers.
+* Data from BRFSS are publicly available and can be used widely by CDC for healthcare program planning. And also independent researchers can use this data for in-depth reseacrch and analytics purpose.
+
+###Types of BRFSS Analytics
+#### Descriptive Analysis
+* Aimed at developing population-based rates.
+* Dependent upon the sampling approach--uses "weights".
+* More often done by CDC and states.
+
+#### Cross-Sectional Analysis
+* Aimed at exploring cross-sectional associations (hinting to potential causes)
+* Weighting is generally not used.
+* More often done by independent researchers.
+
+### Resources
+#### BRFSS Resource Provided by CDC.
+* Datasets https://www.cdc.gov/brfss/annual_data/annual_data.htm
+* Questionnaires.
+* Codebook - Provides univariate summary statistics about each variable.
+* Documentation and explanations.
+
+```{r, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Environment Setup
+```{r,include=TRUE,warning=FALSE,message=FALSE}
+
+# Load the required packages (if packages are not available, install them first)
+for (package in c('foreign','gtools','questionr','MASS','caret','readr','ggplot2','magrittr','ggthemes','dplyr','corrplot','caTools')) {
+  if (!require(package, character.only=T, quietly=T)) {
+    install.packages(package)
+    library(package,character.only=T)
+  }
+}
+# Package Desription
+# foreign   : Reads in "foreign" data types.
+# gtools    : Allows you to make macros.
+# dplyr     : Helps packages for calculating means and standard deviations.
+# questionr : Allows you to do a weighted analysis.
+# MASS      : Allows you to do bivariate tests.
+```
+
+### Designing Metadata
+```{r}
+# Set up the data dictionary 
+# Let us assume we are referring our native variables for " US Army Dataset". Therefore, we will refer the data variable in ARMY terms i.e.
+# 1. Let's select a subpopulation (veterans)
+# 2. Let's select a risk factor (alcohol).
+# 3. Let's select two outcomes.
+#     Continuous: hours of sleep per night
+#     Categorical: asthma(yes/no)
+# Define Confounding Variables (variable associated with the Exposure and with the Outcome)
+```
+
+### Reading and Cleaning the Data
+```{r ,include=TRUE,warning=FALSE,message=FALSE}
+##Get the Data 
+library(foreign)
+# Read the csv file and save in an object called "BRFSS_data"
+BRFSS_a <- read.xport("C:/CompleteMLProjects/Healthcare/BRFSS/Analytics/Data/LLCP2014.xpt")
+colnames(BRFSS_a)
+```
+
+### Subset unwanted values from the dataset
+```{r}
+#define object list of variables to be kept
+BRFSSVarList <- c("VETERAN3", 
+			"ALCDAY5",
+			"SLEPTIM1",
+			"ASTHMA3",
+			"X_AGE_G",
+			"SMOKE100",
+			"SMOKDAY2",
+			"SEX",
+			"X_HISPANC",
+			"X_MRACE1",
+			"MARITAL",
+			"GENHLTH",
+			"HLTHPLN1",
+			"EDUCA",
+			"INCOME2",
+			"X_BMI5CAT",
+			"EXERANY2")
+
+# subset by varlist
+BRFSS_b <- BRFSS_a[BRFSSVarList]
+
+# check columns
+colnames(BRFSS_b)
+
+# check rows
+nrow(BRFSS_b)
+
+# SUBSET AND SEPERATE NUMBER OF VETERANS AND NON VETERANS FROM THE DATASET
+BRFSS_c <- subset(BRFSS_b,VETERAN3==1)
+
+# Check the variable value 
+# BRFSS_c$VETERAN3
+# Check the number of rows for BRFSS_c
+nrow(BRFSS_c)
+
+# We can see 62120 number of VETERANS are in the dataset
+# Also we now know that  464664 - 62120 = 402544 number of non veterans are in the dataset.
+
+# ONLY KEEP ROWS WITH VALID ALCOHOL/EXPOSURE VARIABLE.
+BRFSS_d <- subset(BRFSS_c, ALCDAY5 < 777 | ALCDAY5 == 888)
+
+# Take a look at the data
+# BRFSS_d$ALCDAY5
+# Check the number of rows for BRFSS_d
+nrow(BRFSS_d)
+# 58991 are the number of veterans that do not consume Alcohol.
+# Hence we know now 62120 - 58991 = 3129 number of veterans that consume Alcohol.
+ 
+
+# EXCLUDING SLEEP TIME VARIABLES
+# Only keep variable with valid sleep data
+BRFSS_e <- subset(BRFSS_d,SLEPTIM1 < 77)
+
+# Check the number of rows for BRFSS_e
+nrow(BRFSS_e)
+# 58321 are the number of veterans with valid sleep data.
+# Hence we know now 58991 - 58321 = 670 number of veterans that have valid sleep pattern.
+
+# EXCLUDING ASTHMA VARIABLES 
+
+# Only keep variables with valid Asthma data
+BRFSS_f <- subset(BRFSS_e, ASTHMA3 < 7)
+
+# Check the number of rows for BRFSS_f
+nrow(BRFSS_f)
+# 58131 are the number of veterans with valid Asthma data.
+# Hence we know now 58321 - 58131 = 190 number of veterans  have valid Asthma data.
+```
+
+### Generating Exposure Variable
+#### First, we will go to our exposure, alcohol. Make a grouping variable for alcohol, and indicator variables for drinking monthly and drinking weekly
+#### From the Data Dictionary on the ALCDAY5 tab, we see that if ALCDAY5 falls in this range, 101 to 199, our ALCGRP variable should be coded as three, drink weekly. And those in the 201 to 299 range get a two for drink monthly. And the 888's get a one for no drinks. And the rest are nine, for unknown.
+#### Also If ALCGRP is two, the drink monthly flag will be one and everyone else gets a zero. If ALCGRP is three, the drink weekly flag will be one and everyone else gets a zero.
+```{r}
+# Add Indicator variable for Veterans
+# First make copy of the dataset
+BRFSS_g <- BRFSS_f
+
+# add the categorical variable set to 9 to the dataset
+BRFSS_g$ALCGRP <- 9
+
+# update according to data Dictionary
+BRFSS_g$ALCGRP[BRFSS_g$ALCDAY5 < 200] <- 3
+BRFSS_g$ALCGRP[BRFSS_g$ALCDAY5 >= 200 & BRFSS_g$ALCDAY5 <777] <- 2
+BRFSS_g$ALCGRP[BRFSS_g$ALCDAY5 == 888] <- 1
+
+# Check the variable 
+table(BRFSS_g$ALCGRP, BRFSS_g$ALCDAY5)
+
+# Add flags
+# Flags for Monthly drinkers
+BRFSS_g$DRKMONTHLY <- 0
+BRFSS_g$DRKMONTHLY[BRFSS_g$ALCGRP == 2] <- 1
+
+table(BRFSS_g$ALCGRP,BRFSS_g$DRKMONTHLY)
+
+# Flags for Weekly drinkers
+BRFSS_g$DRKWEEKLY <- 0
+BRFSS_g$DRKWEEKLY[BRFSS_g$ALCGRP == 1] <- 1
+
+table(BRFSS_g$ALCGRP,BRFSS_g$DRKWEEKLY)
+```
+
+### Generate outcome variables from data dictionary
+#### First, we are going to clean up our outcome variable for sleep duration. Next, we will make sure we have binary variable or flag that is valid for our asthma outcome.
+```{r}
+#  We need to remove the rows with no information on sleep time and we want to turn our asthma variable into an indicator variable with only ones and zeroes.
+
+# First make copy of the dataset
+BRFSS_h <- BRFSS_g
+
+# Make and test sleep variable
+# First generate a SLEEPTIM2 variable that is a continuous variable for SLEEEPTIM1 and assign them all as NA
+BRFSS_h$SLEPTIM2 <- NA
+
+# Add and check for criteria that SLEPTIM1 cannot be NA and it cannot be 77 and cannot be 99.
+BRFSS_h$SLEPTIM2[!is.na(BRFSS_h$SLEPTIM1) & BRFSS_h$SLEPTIM1 !=77 & BRFSS_h$SLEPTIM1 !=99] <- BRFSS_h$SLEPTIM1
+
+# Check the variable
+table(BRFSS_h$SLEPTIM1,BRFSS_h$SLEPTIM2)
+```
+
+### Make and test asthma variable
+```{r}
+# Assign 9 to ASTHMA4 
+BRFSS_h$ASTHMA4 <- 9
+
+# Then assign 1 to all who have reported ASTHMA
+BRFSS_h$ASTHMA4[BRFSS_h$ASTHMA3 == 1] <- 1
+
+# Then assign 0 to all who have reported ASTHMA
+BRFSS_h$ASTHMA4[BRFSS_h$ASTHMA3 == 2] <- 0
+
+# Check the variable
+table(BRFSS_h$ASTHMA3,BRFSS_h$ASTHMA4)
+
+```
+
+### Generating Age variables
+```{r}
+# First make copy of the dataset
+BRFSS_i <- BRFSS_h
+
+# From the data dictionary by default set the value of all age groups to 0.
+# Age group 18 to 24 we can keep it as reference group
+BRFSS_i$AGE2 <- 0   # Age 25 to 34
+BRFSS_i$AGE3 <- 0   # Age 35 to 44
+BRFSS_i$AGE4 <- 0   # Age 45 to 54
+BRFSS_i$AGE5 <- 0   # Age 55 to 64
+BRFSS_i$AGE6 <- 0   # Age 65 and older
+
+# set conditions to update the flags
+
+BRFSS_i$AGE2[BRFSS_i$X_AGE_G == 2] <- 1
+table(BRFSS_i$X_AGE_G,BRFSS_i$AGE2)
+
+BRFSS_i$AGE3[BRFSS_i$X_AGE_G == 3] <- 1
+table(BRFSS_i$X_AGE_G,BRFSS_i$AGE3)
+
+BRFSS_i$AGE4[BRFSS_i$X_AGE_G == 4] <- 1
+table(BRFSS_i$X_AGE_G,BRFSS_i$AGE4)
+
+BRFSS_i$AGE5[BRFSS_i$X_AGE_G == 5] <- 1
+table(BRFSS_i$X_AGE_G,BRFSS_i$AGE5)
+
+BRFSS_i$AGE6[BRFSS_i$X_AGE_G == 6] <- 1
+table(BRFSS_i$X_AGE_G,BRFSS_i$AGE6)
+
+```
+
+### MAKE SMOKING VARIABLES
+```{r}
+# Make smoking variables
+BRFSS_i$NEVERSMK <- 0
+BRFSS_i$NEVERSMK [BRFSS_i$SMOKE100 == 2] <- 1
+table(BRFSS_i$SMOKE100,BRFSS_i$NEVERSMK)
+
+# Make grouping variable
+BRFSS_i$SMOKGRP <- 9
+BRFSS_i$SMOKGRP[BRFSS_i$SMOKDAY2 == 1 | BRFSS_i$SMOKDAY2 == 2] <- 1
+BRFSS_i$SMOKGRP[BRFSS_i$SMOKDAY2 == 3 | BRFSS_i$NEVERSMK == 1] <- 2
+
+table(BRFSS_i$SMOKGRP,BRFSS_i$SMOKDAY2)
+table(BRFSS_i$SMOKGRP,BRFSS_i$SMOKE100)
+
+BRFSS_i$SMOKER <- 0
+BRFSS_i$SMOKER[BRFSS_i$SMOKGRP == 1] <- 1
+
+table(BRFSS_i$SMOKGRP, BRFSS_i$SMOKER)
+```
+
+### Make Sex variable
+```{r}
+BRFSS_i$MALE <- 0
+BRFSS_i$MALE[BRFSS_i$SEX == 1] <- 1
+
+table(BRFSS_i$MALE, BRFSS_i$SEX)
+```
+
+### Make Hispanic variable
+```{r}
+BRFSS_i$HISPANIC <- 0
+BRFSS_i$HISPANIC[BRFSS_i$X_HISPANC == 1] <- 1
+
+table(BRFSS_i$HISPANIC, BRFSS_i$X_HISPANC)
+```
+
+### Make Race variables
+```{r}
+BRFSS_i$RACEGRP <- 9
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 1] <- 1
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 2] <- 2
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 3] <- 3
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 4] <- 4
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 5] <- 5
+BRFSS_i$RACEGRP[BRFSS_i$X_MRACE1 == 6 | BRFSS_i$X_MRACE1 == 7] <- 6
+
+table(BRFSS_i$RACEGRP , BRFSS_i$X_MRACE1)
+
+BRFSS_i$BLACK <- 0
+BRFSS_i$ASIAN <- 0
+BRFSS_i$OTHRACE <- 0
+
+BRFSS_i$BLACK[BRFSS_i$RACEGRP == 2] <- 1
+table(BRFSS_i$RACEGRP, BRFSS_i$BLACK)
+
+BRFSS_i$ASIAN[BRFSS_i$RACEGRP == 4] <- 1
+table(BRFSS_i$RACEGRP, BRFSS_i$ASIAN)
+
+BRFSS_i$OTHRACE[BRFSS_i$RACEGRP == 3 | BRFSS_i$RACEGRP == 5 | BRFSS_i$RACEGRP == 6 | BRFSS_i$RACEGRP == 7] <- 1
+table(BRFSS_i$RACEGRP, BRFSS_i$OTHRACE)
+```
+
+### Make Marital variables
+```{r}
+BRFSS_i$MARGRP <- 9
+BRFSS_i$MARGRP[BRFSS_i$MARITAL == 1 | BRFSS_i$MARITAL == 5] <- 1
+BRFSS_i$MARGRP[BRFSS_i$MARITAL == 2 | BRFSS_i$MARITAL == 3 ] <- 2
+BRFSS_i$MARGRP[BRFSS_i$MARITAL == 4] <- 3
+
+table(BRFSS_i$MARGRP, BRFSS_i$MARITAL)
+
+BRFSS_i$NEVERMAR <- 0
+BRFSS_i$FORMERMAR <- 0
+
+BRFSS_i$NEVERMAR[BRFSS_i$MARGRP == 3] <- 1
+table(BRFSS_i$MARGRP, BRFSS_i$NEVERMAR)
+
+BRFSS_i$FORMERMAR[BRFSS_i$MARGRP == 2] <- 1
+table(BRFSS_i$MARGRP, BRFSS_i$FORMERMAR)
+```
+
+### Make Genhealth variables
+```{r}
+BRFSS_i$GENHLTH2 <- 9
+BRFSS_i$GENHLTH2[BRFSS_i$GENHLTH == 1] <- 1
+BRFSS_i$GENHLTH2[BRFSS_i$GENHLTH == 2] <- 2
+BRFSS_i$GENHLTH2[BRFSS_i$GENHLTH == 3] <- 3
+BRFSS_i$GENHLTH2[BRFSS_i$GENHLTH == 4] <- 4
+BRFSS_i$GENHLTH2[BRFSS_i$GENHLTH == 5] <- 5
+
+table(BRFSS_i$GENHLTH2, BRFSS_i$GENHLTH)
+
+BRFSS_i$FAIRHLTH <- 0
+BRFSS_i$POORHLTH <- 0
+
+BRFSS_i$FAIRHLTH [BRFSS_i$GENHLTH2 == 4] <- 1
+table(BRFSS_i$FAIRHLTH, BRFSS_i$GENHLTH2)
+
+BRFSS_i$POORHLTH [BRFSS_i$GENHLTH2 == 5] <- 1
+table(BRFSS_i$POORHLTH, BRFSS_i$GENHLTH2)
+```
+
+### Make health plan variables
+```{r}
+BRFSS_i$HLTHPLN2 <- 9
+BRFSS_i$HLTHPLN2[BRFSS_i$HLTHPLN1 == 1] <- 1
+BRFSS_i$HLTHPLN2[BRFSS_i$HLTHPLN1 == 2] <- 2
+
+table(BRFSS_i$HLTHPLN1, BRFSS_i$HLTHPLN2)
+
+BRFSS_i$NOPLAN <- 0
+BRFSS_i$NOPLAN [BRFSS_i$HLTHPLN2== 2] <- 1
+table(BRFSS_i$NOPLAN, BRFSS_i$HLTHPLN2)
+```
+
+### Make education variables
+```{r}
+BRFSS_i$EDGROUP <- 9
+BRFSS_i$EDGROUP[BRFSS_i$EDUCA == 1 | BRFSS_i$EDUCA == 2 | BRFSS_i$EDUCA == 3] <- 1
+BRFSS_i$EDGROUP[BRFSS_i$EDUCA == 4] <- 2
+BRFSS_i$EDGROUP[BRFSS_i$EDUCA == 5] <- 3
+BRFSS_i$EDGROUP[BRFSS_i$EDUCA == 6] <- 4
+
+table(BRFSS_i$EDGROUP, BRFSS_i$EDUCA)
+
+BRFSS_i$LOWED <- 0
+BRFSS_i$SOMECOLL <- 0
+
+BRFSS_i$LOWED[BRFSS_i$EDGROUP == 1 | BRFSS_i$EDGROUP == 2 ] <- 1
+table(BRFSS_i$LOWED, BRFSS_i$EDGROUP)
+
+BRFSS_i$SOMECOLL [BRFSS_i$EDGROUP == 3] <- 1
+table(BRFSS_i$SOMECOLL, BRFSS_i$EDGROUP)
+```
+### Make income variables
+```{r}
+BRFSS_i$INCOME3 <- BRFSS_i$INCOME2
+BRFSS_i$INCOME3[BRFSS_i$INCOME2 >=77] <- 9
+
+table(BRFSS_i$INCOME2, BRFSS_i$INCOME3)
+
+BRFSS_i$INC1 <- 0
+BRFSS_i$INC2 <- 0
+BRFSS_i$INC3 <- 0
+BRFSS_i$INC4 <- 0
+BRFSS_i$INC5 <- 0
+BRFSS_i$INC6 <- 0
+BRFSS_i$INC7 <- 0
+
+BRFSS_i$INC1[BRFSS_i$INCOME3 == 1] <- 1
+table(BRFSS_i$INC1, BRFSS_i$INCOME3)
+
+BRFSS_i$INC2[BRFSS_i$INCOME3 == 2] <- 1
+table(BRFSS_i$INC2, BRFSS_i$INCOME3)
+
+BRFSS_i$INC3[BRFSS_i$INCOME3 == 3] <- 1
+table(BRFSS_i$INC3, BRFSS_i$INCOME3)
+
+BRFSS_i$INC4[BRFSS_i$INCOME3 == 4] <- 1
+table(BRFSS_i$INC4, BRFSS_i$INCOME3)
+
+BRFSS_i$INC5[BRFSS_i$INCOME3 == 5] <- 1
+table(BRFSS_i$INC5, BRFSS_i$INCOME3)
+
+BRFSS_i$INC6[BRFSS_i$INCOME3 == 6] <- 1
+table(BRFSS_i$INC6, BRFSS_i$INCOME3)
+
+BRFSS_i$INC7[BRFSS_i$INCOME3 == 7] <- 1
+table(BRFSS_i$INC7, BRFSS_i$INCOME3)
+```
+
+### Make BMI variables
+```{r}
+BRFSS_i$BMICAT<- 9
+BRFSS_i$BMICAT[BRFSS_i$X_BMI5CAT ==1] <- 1
+BRFSS_i$BMICAT[BRFSS_i$X_BMI5CAT ==2] <- 2
+BRFSS_i$BMICAT[BRFSS_i$X_BMI5CAT ==3] <- 3
+BRFSS_i$BMICAT[BRFSS_i$X_BMI5CAT ==4] <- 4
+
+table(BRFSS_i$BMICAT, BRFSS_i$X_BMI5CAT)
+
+BRFSS_i$UNDWT <- 0
+BRFSS_i$OVWT <- 0
+BRFSS_i$OBESE <- 0
+
+BRFSS_i$UNDWT[BRFSS_i$BMICAT== 1] <- 1
+table(BRFSS_i$UNDWT, BRFSS_i$BMICAT)
+
+BRFSS_i$OVWT[BRFSS_i$BMICAT== 3] <- 1
+table(BRFSS_i$OVWT, BRFSS_i$BMICAT)
+
+BRFSS_i$OBESE[BRFSS_i$BMICAT== 4] <- 1
+table(BRFSS_i$OBESE, BRFSS_i$BMICAT)
+```
+
+### Make exercise variables
+```{r}
+BRFSS_i$EXERANY3<- 9
+BRFSS_i$EXERANY3[BRFSS_i$EXERANY2 ==1] <- 1
+BRFSS_i$EXERANY3[BRFSS_i$EXERANY2 ==2] <- 2
+
+table(BRFSS_i$EXERANY3, BRFSS_i$EXERANY2)
+
+BRFSS_i$NOEXER <- 0
+BRFSS_i$NOEXER[BRFSS_i$EXERANY3 ==2] <- 1
+table(BRFSS_i$NOEXER, BRFSS_i$EXERANY3)
+
+nrow(BRFSS_i)
+```
+
+### Write out analytic dataset
+```{r}
+write.csv(BRFSS_i, file = "analytic.csv")
+```
+
+### Finally now that we have a clean dataset in hand.Let us analyze this data.
+
+```{r}
+#read in analytic table
+analytic <- read.csv(file="C:/CompleteMLProjects/Healthcare/BRFSS/Analytics/Code/analytic.csv", header=TRUE, sep=",")
+
+#Look at distribution of categorical outcome asthma
+
+AsthmaFreq <- table(analytic$ASTHMA4)
+AsthmaFreq
+write.csv(AsthmaFreq, file = "AsthmaFreq.csv")
+
+#what proportion of our dataset has ashtma?
+PropAsthma <- 5343/52788
+PropAsthma
+
+#Look at categorical outcome asthma by exposure, ALCGRP
+AsthmaAlcFreq <- table(analytic$ASTHMA4, analytic$ALCGRP)
+AsthmaAlcFreq
+write.csv(AsthmaAlcFreq, file = "AsthmaAlcFreq.csv")
+```
+
+### Look at distribution of sleep duration 
+```{r}
+#summary statistics
+summary(analytic$SLEPTIM2)
+
+#look at histogram and box plot of total file
+hist(analytic$SLEPTIM2, 
+	main = "Histogram of SLEPTIM2",
+	xlab = "Class SLEPTIM2",
+	ylab = "Frequency",
+	xlim=c(0,15), 
+	ylim=c(0,20000),
+	border = "red",
+	col= "yellow",
+	las = 1,
+	breaks = 24)
+
+boxplot(analytic$SLEPTIM2, main="Box Plot of SLEPTIM2", 
+  	xlab="Total File", ylab="SLEPTIM2")
+
+#See box plots of groups next to each other
+boxplot(SLEPTIM2~ALCGRP, data=analytic, main="Box Plot of SLEPTIM2 by ALCGRP", 
+  	xlab="ALCGRP", ylab="SLEPTIM2")
+```
+
+### Making frequencies per category
+```{r}
+AsthmaFreq <- table(analytic$ASTHMA4)
+AsthmaFreq
+write.csv(AsthmaFreq, file = "AsthmaFreq.csv")
+
+AlcFreq <- table(analytic$ALCGRP)
+AlcFreq 
+write.csv(AlcFreq , file = "AlcFreq.csv")
+
+#USING MACROS
+
+#install package gtools
+#then call up library
+
+library(gtools)
+#use defmacro to define the macro
+FreqTbl <-defmacro(OutputTable, InputVar, CSVTable, 
+expr={
+OutputTable <- table(InputVar);
+write.csv(OutputTable, file = paste0(CSVTable, ".csv"))
+})
+
+FreqTbl (AlcFreq, analytic$ALCGRP, "Alc")
+FreqTbl (AgeFreq, analytic$X_AGE_G, "Age")
+FreqTbl (SexFreq, analytic$SEX, "Sex")
+FreqTbl (HispFreq, analytic$X_HISPANC, "Hisp")
+FreqTbl (RaceFreq, analytic$RACEGRP, "Race")
+FreqTbl (MaritalFreq, analytic$MARGRP, "Mar")
+FreqTbl (EdFreq, analytic$EDGROUP, "Ed")
+FreqTbl (IncFreq, analytic$INCOME3, "Inc")
+FreqTbl (BMIFreq, analytic$BMICAT, "BMI")
+FreqTbl (SmokeFreq, analytic$SMOKGRP, "Smok")
+FreqTbl (ExerFreq, analytic$EXERANY3, "Exer")
+FreqTbl (HlthPlanFreq, analytic$HLTHPLN2, "HlthPln")
+FreqTbl (GenHlthFreq, analytic$GENHLTH2, "GenHlth")
+```
+
+### Checking for No Asthma frequencies
+```{r}
+### Subset dataset with only asthma people
+asthmaonly <- subset(analytic, ASTHMA4 == 1)
+table(asthmaonly$ASTHMA4)
+nrow(asthmaonly)
+
+AsthmaFreq <- table(asthmaonly$ASTHMA4)
+AsthmaFreq
+write.csv(AsthmaFreq, file = "Asthma.csv")
+
+#USING MACROS
+library(gtools)
+#use defmacro to define the macro
+FreqTbl <-defmacro(OutputTable, InputVar, CSVTable, 
+expr={
+OutputTable <- table(InputVar);
+write.csv(OutputTable, file = paste0(CSVTable, ".csv"))
+})
+
+FreqTbl (AlcGrpFreq, asthmaonly$ALCGRP, "Alc")
+FreqTbl (AgeGrpFreq, asthmaonly$X_AGE_G, "Age")
+FreqTbl (SexFreq, asthmaonly$SEX, "Sex")
+FreqTbl (HispFreq, asthmaonly$X_HISPANC, "Hisp")
+FreqTbl (RaceFreq, asthmaonly$RACEGRP, "Race")
+FreqTbl (MaritalFreq, asthmaonly$MARGRP, "Mar")
+FreqTbl (EdFreq, asthmaonly$EDGROUP, "Ed")
+FreqTbl (IncFreq, asthmaonly$INCOME3, "Inc")
+FreqTbl (BMIFreq, asthmaonly$BMICAT, "BMI")
+FreqTbl (SmokeFreq, asthmaonly$SMOKGRP, "Smok")
+FreqTbl (ExerFreq, asthmaonly$EXERANY3, "Exer")
+FreqTbl (HlthPlanFreq, asthmaonly$HLTHPLN2, "HlthPln")
+FreqTbl (GenHlthFreq, asthmaonly$GENHLTH2, "GenHlth")
+```
+
+### Checking for No Asthma frequencies
+```{r}
+#subset dataset with only asthma people
+noasthmaonly <- subset(analytic, ASTHMA4 != 1)
+table(noasthmaonly $ASTHMA4)
+nrow(noasthmaonly)
+
+AsthmaFreq <- table(noasthmaonly$ASTHMA4)
+AsthmaFreq
+write.csv(AsthmaFreq, file = "Asthma.csv")
+
+#USING MACROS
+library(gtools)
+#use defmacro to define the macro
+FreqTbl <-defmacro(OutputTable, InputVar, CSVTable, 
+expr={
+OutputTable <- table(InputVar);
+write.csv(OutputTable, file = paste0(CSVTable, ".csv"))
+})
+
+FreqTbl (AlcGrpFreq, noasthmaonly$ALCGRP, "Alc")
+FreqTbl (AgeGrpFreq, noasthmaonly$X_AGE_G, "Age")
+FreqTbl (SexFreq, noasthmaonly$SEX, "Sex")
+FreqTbl (HispFreq, noasthmaonly$X_HISPANC, "Hisp")
+FreqTbl (RaceFreq, noasthmaonly$RACEGRP, "Race")
+FreqTbl (MaritalFreq, noasthmaonly$MARGRP, "Mar")
+FreqTbl (EdFreq, noasthmaonly$EDGROUP, "Ed")
+FreqTbl (IncFreq, noasthmaonly$INCOME3, "Inc")
+FreqTbl (BMIFreq, noasthmaonly$BMICAT, "BMI")
+FreqTbl (SmokeFreq, noasthmaonly$SMOKGRP, "Smok")
+FreqTbl (ExerFreq, noasthmaonly$EXERANY3, "Exer")
+FreqTbl (HlthPlanFreq, noasthmaonly$HLTHPLN2, "HlthPln")
+FreqTbl (GenHlthFreq, noasthmaonly$GENHLTH2, "GenHlth")
+```
+
+### Means and Standard Deviations
+```{r}
+mean(analytic$SLEPTIM2)
+sd(analytic$SLEPTIM2)
+
+#load package plyr
+library(plyr)
+#example
+ddply(analytic,~ALCGRP,summarise,mean=mean(SLEPTIM2),sd=sd(SLEPTIM2))
+
+#USING MACROS
+library(gtools)
+SumTbl <- defmacro(OutputTable, GroupVar, CSVTable,
+expr={
+OutputTable <- ddply(analytic,~GroupVar,summarise,mean=mean(SLEPTIM2),sd=sd(SLEPTIM2));
+write.csv(OutputTable, file = paste0(CSVTable, ".csv"))
+})
+
+SumTbl (AlcGrpSum, analytic$ALCGRP, "Alc")
+SumTbl (AgeGrpSum, analytic$X_AGE_G, "Age")
+SumTbl (SexSum, analytic$SEX, "Sex")
+SumTbl (HispSum, analytic$X_HISPANC, "Hisp")
+SumTbl (RaceSum, analytic$RACEGRP, "Race")
+SumTbl (MaritalSum, analytic$MARGRP, "Mar")
+SumTbl (EdSum, analytic$EDGROUP, "Ed")
+SumTbl (IncSum, analytic$INCOME3, "Inc")
+SumTbl (BMISum, analytic$BMICAT, "BMI")
+SumTbl (SmokeSum, analytic$SMOKGRP, "Smok")
+SumTbl (ExerSum, analytic$EXERANY3, "Exer")
+SumTbl (HlthPlanSum, analytic$HLTHPLN2, "HlthPln")
+SumTbl (GenHlthSum, analytic$GENHLTH2, "GenHlth")
+```
+
+###weights example
+```{r}
+WeightVarList <- c("X_STATE", "X_LLCPWT", "ASTHMA3")
+
+BRFSS_weights <- subset(BRFSS_a[WeightVarList])
+
+colnames(BRFSS_weights)
+nrow(BRFSS_weights)
+
+#use questionr package
+
+library(questionr)
+
+WeightedAsthma <- wtd.table(BRFSS_weights$ASTHMA3, 
+	y=BRFSS_weights$X_STATE, weights = BRFSS_weights$X_LLCPWT, normwt = FALSE, na.rm = TRUE,
+  	na.show = FALSE)
+write.csv(WeightedAsthma, file = "WeightedAsthma.csv")
+```
+
+### Table1 Chisq
+```{r}
+#load MASS library
+
+library(MASS)
+
+#make table
+
+AlcTbl = table(analytic$ASTHMA4, analytic$ALCGRP) 
+
+#run test
+chisq.test(AlcTbl)  
+
+#make macro
+
+library(gtools)
+
+ChiTest <- defmacro(VarName, TblName, expr={
+TblName = table(analytic$ASTHMA4, analytic$VarName); 
+chisq.test(TblName)})
+
+ChiTest(ALCGRP, AlcTbl)
+ChiTest(X_AGE_G, AgeTbl)
+ChiTest(SEX, SexTbl)
+ChiTest(X_HISPANC, HispTbl)
+ChiTest(RACEGRP, RaceTbl)
+ChiTest(MARGRP, MarTbl)
+ChiTest(EDGROUP, EdTbl)
+ChiTest(INCOME3, IncTbl)
+ChiTest(BMICAT, BMITbl)
+ChiTest(SMOKGRP, SmokTbl)
+ChiTest(EXERANY3, ExerTbl)
+ChiTest(HLTHPLN2, HlthPlnTbl)
+ChiTest(GENHLTH2, GenHlthTbl)
+```
+
+### ANOVAS for Table 1
+```{r}
+#example ANOVA
+
+AlcANOVA <- lm(formula = SLEPTIM2 ~ ALCGRP, data = analytic)
+summary(AlcANOVA)
+
+#make macro
+
+library(gtools)
+
+ANOVATest <- defmacro(VarName, TblName, expr={
+TblName<- lm(formula = SLEPTIM2 ~ VarName, data = analytic);
+summary(TblName)})
+
+#call macro
+
+ANOVATest (ALCGRP, AlcANOVA)
+ANOVATest (X_AGE_G, AgeANOVA)
+ANOVATest (X_HISPANC, HispANOVA)
+ANOVATest (RACEGRP, RaceANOVA)
+ANOVATest (MARGRP, MarANOVA)
+ANOVATest (EDGROUP, EdANOVA)
+ANOVATest (INCOME3, IncANOVA)
+ANOVATest (BMICAT, BMIANOVA)
+ANOVATest (SMOKGRP, SmokANOVA)
+ANOVATest (EXERANY3, ExerANOVA)
+ANOVATest (HLTHPLN2, HlthPlnANOVA)
+ANOVATest (GENHLTH2, GenHlthANOVA)
+```
+
+### ttests for Table 1
+```{r}
+t.test(analytic$SLEPTIM2~analytic$ASTHMA4)
+t.test(analytic$SLEPTIM2~analytic$SEX)
+```
+### The complete Descriptive analysis of BRFFS data is done. We know that Descriptive analysis can lead to Regression. In the next part we will proceed with doing Linear Regression for this analysis.
 
